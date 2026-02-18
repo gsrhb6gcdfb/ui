@@ -65,11 +65,25 @@ type Tab = "songs" | "history" | "settings"
 
 // --- Settings Panel ---
 
-function SettingsPanel() {
-  const [outputDevice, setOutputDevice] = useState("\u0412\u0441\u0442\u0440\u043e\u0435\u043d\u043d\u044b\u0439 \u0432\u044b\u0445\u043e\u0434")
+function SettingsPanel({ audioDevices, engineStatus, onSetOutputDevice, isElectronMode }: {
+  audioDevices?: Array<{ index: number; name: string; hostApi: string; maxOutputChannels: number; isDefault: boolean }>
+  engineStatus?: { sampleRate: number; bufferSize: number; outputDevice: string; hostApi: string; cpuLoad: number } | null
+  onSetOutputDevice?: (deviceIndex: number) => Promise<void>
+  isElectronMode?: boolean
+}) {
   const [clickDevice, setClickDevice] = useState("\u0422\u043e\u0442 \u0436\u0435")
   const [autoplay, setAutoplay] = useState(false)
   const [fadeTime, setFadeTime] = useState(2)
+
+  const devices = audioDevices && audioDevices.length > 0
+    ? audioDevices
+    : [
+        { index: 0, name: "\u0412\u0441\u0442\u0440\u043e\u0435\u043d\u043d\u044b\u0439 \u0432\u044b\u0445\u043e\u0434", hostApi: "WASAPI", maxOutputChannels: 2, isDefault: true },
+        { index: 1, name: "HDMI", hostApi: "WASAPI", maxOutputChannels: 8, isDefault: false },
+        { index: 2, name: "USB Audio", hostApi: "WASAPI", maxOutputChannels: 2, isDefault: false },
+      ]
+
+  const currentDevice = engineStatus?.outputDevice || devices.find(d => d.isDefault)?.name || devices[0]?.name
 
   return (
     <div className="flex h-full flex-col gap-0 overflow-y-auto">
@@ -80,18 +94,30 @@ function SettingsPanel() {
           <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
             {"\u0410\u0443\u0434\u0438\u043e \u0432\u044b\u0445\u043e\u0434"}
           </span>
+          {isElectronMode && engineStatus && (
+            <span className="ml-auto text-[10px] text-muted-foreground">
+              {engineStatus.hostApi} | {engineStatus.sampleRate / 1000}kHz | {engineStatus.bufferSize} smp | CPU: {(engineStatus.cpuLoad * 100).toFixed(1)}%
+            </span>
+          )}
         </div>
         <div className="flex flex-col gap-2">
           <div className="flex items-center justify-between">
             <span className="text-sm text-foreground">{"\u041e\u0441\u043d\u043e\u0432\u043d\u043e\u0439 \u0432\u044b\u0445\u043e\u0434"}</span>
             <select
-              value={outputDevice}
-              onChange={(e) => setOutputDevice(e.target.value)}
-              className="rounded border border-border bg-secondary px-2 py-1 text-xs text-foreground outline-none"
+              value={currentDevice}
+              onChange={async (e) => {
+                const dev = devices.find(d => d.name === e.target.value)
+                if (dev && onSetOutputDevice) {
+                  await onSetOutputDevice(dev.index)
+                }
+              }}
+              className="max-w-[220px] rounded border border-border bg-secondary px-2 py-1 text-xs text-foreground outline-none"
             >
-              <option>{"\u0412\u0441\u0442\u0440\u043e\u0435\u043d\u043d\u044b\u0439 \u0432\u044b\u0445\u043e\u0434"}</option>
-              <option>{"HDMI"}</option>
-              <option>{"USB Audio"}</option>
+              {devices.map((d) => (
+                <option key={d.index} value={d.name}>
+                  {d.name} ({d.hostApi}, {d.maxOutputChannels}ch)
+                </option>
+              ))}
             </select>
           </div>
           <div className="flex items-center justify-between">
@@ -99,11 +125,14 @@ function SettingsPanel() {
             <select
               value={clickDevice}
               onChange={(e) => setClickDevice(e.target.value)}
-              className="rounded border border-border bg-secondary px-2 py-1 text-xs text-foreground outline-none"
+              className="max-w-[220px] rounded border border-border bg-secondary px-2 py-1 text-xs text-foreground outline-none"
             >
               <option>{"\u0422\u043e\u0442 \u0436\u0435"}</option>
-              <option>{"USB Audio"}</option>
-              <option>{"Bluetooth"}</option>
+              {devices.map((d) => (
+                <option key={d.index} value={d.name}>
+                  {d.name} ({d.hostApi})
+                </option>
+              ))}
             </select>
           </div>
         </div>
@@ -283,9 +312,13 @@ function HistoryPanel() {
 
 interface BottomDrawerProps {
   onSelectSong?: (song: Song) => void
+  audioDevices?: Array<{ index: number; name: string; hostApi: string; maxOutputChannels: number; isDefault: boolean }>
+  engineStatus?: { sampleRate: number; bufferSize: number; outputDevice: string; hostApi: string; cpuLoad: number } | null
+  onSetOutputDevice?: (deviceIndex: number) => Promise<void>
+  isElectronMode?: boolean
 }
 
-export function BottomDrawer({ onSelectSong }: BottomDrawerProps) {
+export function BottomDrawer({ onSelectSong, audioDevices, engineStatus, onSetOutputDevice, isElectronMode }: BottomDrawerProps) {
   const [isOpen, setIsOpen] = useState(false)
   const [activeTab, setActiveTab] = useState<Tab>("songs")
   const [isPinned, setIsPinned] = useState(false)
@@ -348,7 +381,7 @@ export function BottomDrawer({ onSelectSong }: BottomDrawerProps) {
         <div className="h-[calc(280px-32px)]">
           {activeTab === "songs" && <SongsPanel onSelectSong={onSelectSong || (() => {})} />}
           {activeTab === "history" && <HistoryPanel />}
-          {activeTab === "settings" && <SettingsPanel />}
+          {activeTab === "settings" && <SettingsPanel audioDevices={audioDevices} engineStatus={engineStatus} onSetOutputDevice={onSetOutputDevice} isElectronMode={isElectronMode} />}
         </div>
       </div>
 
