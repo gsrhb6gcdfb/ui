@@ -1,187 +1,166 @@
-# Stage Traxx -- Инструкция по сборке (Windows)
+# 📱 Stage Traxx — Инструкция по сборке Windows приложения
 
-## Требования
+## ⚡ Быстрый старт (за 5 минут)
 
-Перед началом установите:
+### Что нужно установить
+- **Node.js** (https://nodejs.org) — выберите LTS версию
+- **Visual Studio 2022 Community** (https://visualstudio.microsoft.com)
+  - Во время установки выберите **"Desktop development with C++"**
+- **Git** (https://git-scm.com) — опционально, если будете клонировать через консоль
 
-| Инструмент | Где скачать | Зачем нужен |
-|---|---|---|
-| **Node.js 20+** | https://nodejs.org | Запуск проекта, npm |
-| **Git** | https://git-scm.com | Клонирование репозитория |
-| **Visual Studio 2022** (Community) | https://visualstudio.microsoft.com | Компиляция C++ аддона |
-| **Python 3.10+** | https://python.org | Нужен для `node-gyp` |
-
-При установке Visual Studio обязательно выберите компонент **"Desktop development with C++"** (Разработка классических приложений C++).
-
----
-
-## Шаг 1. Клонирование и установка зависимостей
+### Запустить приложение БЕЗ звука (за 1 минуту)
 
 ```bash
-git clone <url-репозитория> stage-traxx
+git clone https://github.com/gsrhb6gcdfb/ui.git stage-traxx
 cd stage-traxx
 npm install
-```
-
----
-
-## Шаг 2. Скачивание библиотек декодирования
-
-```bash
-node scripts/setup-native-deps.js
-```
-
-Скрипт скачает заголовочные файлы `dr_wav.h` и `dr_mp3.h` (декодеры WAV/MP3) в папку `native/deps/`.
-
----
-
-## Шаг 3. Сборка PortAudio с ASIO
-
-### 3.1 Скачайте исходники
-
-- **PortAudio**: http://www.portaudio.com/download.html
-- **ASIO SDK**: https://www.steinberg.net/developers/ (нужна регистрация, бесплатно)
-
-### 3.2 Соберите PortAudio через CMake
-
-```bash
-# Распакуйте архив PortAudio
-cd portaudio
-mkdir build
-cd build
-
-# Соберите с поддержкой ASIO
-cmake .. -DPA_USE_ASIO=ON -DASIOSDK_ROOT="C:\path\to\asio-sdk"
-cmake --build . --config Release
-```
-
-### 3.3 Скопируйте результаты в проект
-
-Скопируйте три файла из сборки PortAudio в папку `native/deps/portaudio/`:
-
-```
-portaudio.h         -->  native/deps/portaudio/include/portaudio.h
-portaudio_x64.lib   -->  native/deps/portaudio/lib/portaudio_x64.lib
-portaudio_x64.dll   -->  native/deps/portaudio/bin/portaudio_x64.dll
-```
-
----
-
-## Шаг 4. Сборка нативного аудио-аддона
-
-```bash
-npm install node-addon-api
-cd native
-node-gyp rebuild
-cd ..
-```
-
-После успешной сборки в `native/build/Release/` появится файл `audio_engine.node`.
-
----
-
-## Шаг 5. Запуск в режиме разработки
-
-### Только UI (в браузере, без аудио-движка)
-
-```bash
 npm run dev
 ```
 
-Откройте http://localhost:3000 -- интерфейс работает в режиме симуляции.
+Откройте http://localhost:3000 в браузере — интерфейс работает, но звука нет.
 
-### Electron + нативное аудио
+---
+
+## 🎵 Добавить реальный звук (за 10 минут)
+
+### Шаг 1: Установить зависимости (уже сделано выше)
+```bash
+npm install
+```
+
+### Шаг 2: Получить PortAudio (готовая библиотека)
+
+Вместо того чтобы компилировать PortAudio (это сложно), используем готовую версию.
+
+**Вариант A: Автоматически (проще)**
+```bash
+cd native/deps
+powershell -Command "
+\$url = 'https://github.com/portaudio/portaudio/releases/download/v19.7.0/portaudio19.zip'
+Invoke-WebRequest -Uri \$url -OutFile portaudio.zip
+Expand-Archive portaudio.zip -DestinationPath .
+Remove-Item portaudio.zip
+"
+cd ../..
+```
+
+**Вариант B: Вручную**
+1. Откройте https://github.com/portaudio/portaudio/releases
+2. Скачайте файл `portaudio19.zip` (или похожий)
+3. Распакуйте в папку `native/deps/portaudio`
+4. Убедитесь, что в папке есть подпапки: `include/`, `lib/`, `bin/`
+
+### Шаг 3: Скомпилировать C++ аудио-движок
+
+```bash
+cd native
+node-gyp rebuild --release
+cd ..
+```
+
+Если видите ошибку про Visual Studio:
+```bash
+npm config set msvs_version 2022
+cd native
+node-gyp rebuild --release
+cd ..
+```
+
+### Шаг 4: Запустить с звуком
 
 ```bash
 npm run dev:electron
 ```
 
-Откроется окно Electron с полным аудио-движком. В этом режиме:
-- Доступен выбор ASIO / WASAPI устройств
-- Работает реальное воспроизведение WAV / MP3
-- Отображаются настоящие VU-метры
-- Микширование 8 каналов с панорамой
+Откроется окно приложения с поддержкой:
+- Выбора аудиоустройства (ASIO / WASAPI)
+- Загрузки WAV и MP3 файлов
+- Реального микширования 8 каналов
+- VU метры и регулировка громкости
 
 ---
 
-## Шаг 6. Сборка установщика (.exe)
+## 📦 Создать Windows установщик (.exe)
 
 ```bash
 npm run dist:win
 ```
 
-Эта команда выполнит:
-1. Статическую сборку Next.js (папка `out/`)
-2. Компиляцию Electron TypeScript (папка `dist-electron/`)
-3. Упаковку через electron-builder в NSIS-установщик
-
-Готовый установщик появится в папке `dist-release/`. Файл будет называться примерно:
-
-```
-dist-release/Stage Traxx Setup 1.0.0.exe
-```
+Готовый файл `Stage Traxx Setup 1.0.0.exe` будет в папке `dist-release/`.
+Можете отправить этот .exe другим людям — приложение установится как обычная программа.
 
 ---
 
-## Структура проекта
+## 🔧 Структура папок
 
 ```
 stage-traxx/
-  app/                    # Next.js страницы (UI)
-  components/             # React-компоненты микшера
-  electron/
-    main.ts               # Главный процесс Electron
-    preload.ts            # Мост между UI и нативным кодом
-    ipc-handlers.ts       # Обработчики IPC-команд
-  native/
-    src/
-      audio-engine.cpp    # PortAudio обертка + N-API привязки
-      audio-engine.h
-      mixer.cpp           # Микшер 8 каналов (volume, pan, mute/solo)
-      mixer.h
-    deps/
-      dr_wav.h            # Декодер WAV
-      dr_mp3.h            # Декодер MP3
-      portaudio/          # Заголовки и библиотеки PortAudio
-    binding.gyp           # Конфигурация node-gyp
-  hooks/
-    use-audio-engine.ts   # React-хук для работы с движком
-  lib/
-    electron-api.ts       # Типизированный доступ к electronAPI
-  types/
-    electron.d.ts         # TypeScript-типы для IPC
-  scripts/
-    setup-native-deps.js  # Скрипт загрузки зависимостей
+├── app/               # Интерфейс (Next.js + React)
+├── components/        # Компоненты микшера
+├── electron/          # Electron (десктоп оболочка)
+├── native/            # C++ аудио-движок
+│   ├── src/
+│   │   ├── audio-engine.cpp    # PortAudio обертка
+│   │   └── mixer.cpp           # Микшер 8 каналов
+│   ├── deps/portaudio/         # PortAudio библиотеки
+│   └── build/                  # Скомпилированные .node файлы
+├── hooks/             # React hooks
+├── package.json       # Конфигурация npm
+└── BUILD.md           # Эта инструкция
 ```
 
 ---
 
-## Решение проблем
+## ❌ Ошибки и решения
 
-| Проблема | Решение |
-|---|---|
-| `node-gyp rebuild` не находит компилятор | Убедитесь, что установлен VS 2022 с C++ workload. Запустите `npm config set msvs_version 2022` |
-| `Cannot find portaudio.h` | Проверьте, что `portaudio.h` лежит в `native/deps/portaudio/include/` |
-| `Cannot find portaudio_x64.lib` | Проверьте, что `.lib` файл лежит в `native/deps/portaudio/lib/` |
-| ASIO устройства не видны | Убедитесь, что PortAudio собран с `-DPA_USE_ASIO=ON`, и что установлен ASIO-драйвер устройства |
-| Electron не запускается | Проверьте `npm run build:electron`, ошибки TypeScript будут видны в консоли |
-| Нет звука в Electron | Откройте вкладку "Настройки" внизу, проверьте выбранное устройство вывода |
+| Ошибка | Решение |
+|--------|---------|
+| `CMake Error: The source directory does not appear to contain CMakeLists.txt` | Используйте готовую PortAudio (Шаг 2 Вариант A/B) вместо компиляции из исходников |
+| `node-gyp ERR! gyp ERR!` | Установите Visual Studio 2022 и запустите: `npm config set msvs_version 2022` |
+| `Cannot find portaudio.h` | Проверьте что PortAudio распакована в `native/deps/portaudio` с подпапками `include/`, `lib/`, `bin/` |
+| Нет звука в приложении | 1) Проверьте уровень громкости Windows. 2) В приложении откройте "Настройки" и выберите правильное устройство вывода |
+| Electron не открывается | Попробуйте `npm run dev` в браузере. Если браузер работает, проблема в C++ аддоне — проверьте step 3 |
 
 ---
 
-## Краткая шпаргалка
+## 📋 Все команды
 
+| Команда | Что делает |
+|---------|-----------|
+| `npm install` | Установить JavaScript зависимости |
+| `npm run dev` | Запустить в браузере (без звука) |
+| `npm run dev:electron` | Запустить Electron + реальный звук |
+| `npm run dist:win` | Создать Windows .exe установщик |
+
+---
+
+## ✅ Чеклист
+
+- [ ] Node.js установлен (`node --version` показывает версию)
+- [ ] Visual Studio 2022 установлена (можно проверить в Панель управления → Программы)
+- [ ] Проект клонирован: `git clone ...`
+- [ ] `npm install` завершён без красных ошибок
+- [ ] PortAudio распакована в `native/deps/portaudio`
+- [ ] `npm run dev` работает в браузере на http://localhost:3000
+- [ ] `npm run dev:electron` открывает окно без ошибок в консоли
+- [ ] Можно загружать аудиофайлы и слышать звук
+
+---
+
+## 💡 Советы
+
+**Для быстрого тестирования UI:**
 ```bash
-# Первоначальная настройка (один раз)
-npm install
-node scripts/setup-native-deps.js
-# ... сборка PortAudio (см. шаг 3) ...
-npm install node-addon-api
-cd native && node-gyp rebuild && cd ..
-
-# Ежедневная разработка
-npm run dev:electron
-
-# Финальная сборка
-npm run dist:win
+npm run dev        # Работает сразу, без сборки C++
 ```
+
+**Для разработки с реальным звуком:**
+```bash
+npm run dev:electron   # Медленнее стартует, но работает полностью
+```
+
+**Если не слышно звука:**
+1. Откройте консоль: Ctrl+Shift+I (в окне Electron)
+2. Перейдите на вкладку Console
+3. Посмотрите есть ли красные ошибки
+4. Если видите `audio_engine.node not found` — переделайте Шаг 3
