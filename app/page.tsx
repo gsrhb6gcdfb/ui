@@ -6,6 +6,9 @@ import { MasterStrip } from "@/components/master-strip"
 import { TransportBar } from "@/components/transport-bar"
 import { ImportDialog } from "@/components/import-dialog"
 import { BottomDrawer } from "@/components/bottom-drawer"
+import { useAudioEngine } from "@/hooks/use-audio-engine"
+import { isElectron } from "@/lib/electron-api"
+import type { MeterData } from "@/types/electron"
 
 function createDefaultChannel(id: number): ChannelState {
   const names = [
@@ -28,6 +31,7 @@ function createDefaultChannel(id: number): ChannelState {
 export default function ShowRunnerPage() {
   const [channels, setChannels] = useState<ChannelState[]>(() => {
     const chs = Array.from({ length: 8 }, (_, i) => createDefaultChannel(i + 1))
+    // Demo data for browser preview mode
     chs[0] = { ...chs[0], fileName: "click-track.wav", volume: 60 }
     chs[1] = { ...chs[1], fileName: "drums-full.wav", volume: 82 }
     chs[4] = { ...chs[4], fileName: "guitar-lead.wav", volume: 65, pan: 15 }
@@ -41,16 +45,60 @@ export default function ShowRunnerPage() {
   const [isPlaying, setIsPlaying] = useState(false)
   const [isPaused, setIsPaused] = useState(false)
   const [currentTime, setCurrentTime] = useState(0)
-  const totalTime = 312 // 5:12
+  const [totalTime, setTotalTime] = useState(312) // 5:12
 
   const [importOpen, setImportOpen] = useState(false)
   const [importFileName] = useState("track.wav")
 
+  // Browser fallback animation refs
   const animRef = useRef<number>(0)
   const lastRef = useRef<number>(0)
 
-  // Animate meters during playback
+  // ── Audio engine integration (Electron mode) ──────
+  const { state: engineState, actions: engine } = useAudioEngine({
+    onMeterData: (data: MeterData) => {
+      // Update channel levels from native metering
+      setChannels((prev) =>
+        prev.map((ch) => {
+          const meterCh = data.channels.find((m) => m.id === ch.id)
+          if (!meterCh) return ch
+          return {
+            ...ch,
+            levelL: Math.min(100, meterCh.rmsL * 100),
+            levelR: Math.min(100, meterCh.rmsR * 100),
+          }
+        })
+      )
+      // Update master levels
+      setMasterLevelL(Math.min(100, data.master.rmsL * 100))
+      setMasterLevelR(Math.min(100, data.master.rmsR * 100))
+    },
+    onTimeUpdate: (time: number) => {
+      setCurrentTime(time)
+    },
+    onTransportState: (ts) => {
+      setIsPlaying(ts.isPlaying)
+      setIsPaused(ts.isPaused)
+    },
+    onError: (err) => {
+      console.error("[StageTraxx] Audio engine error:", err)
+    },
+  })
+
+  // Sync engine state
   useEffect(() => {
+    if (engineState.isElectronMode) {
+      setIsPlaying(engineState.isPlaying)
+      setIsPaused(engineState.isPaused)
+      setCurrentTime(engineState.currentTime)
+    }
+  }, [engineState])
+
+  // ── Browser fallback: animate meters during playback ──
+  useEffect(() => {
+    // Skip browser simulation when running in Electron
+    if (isElectron()) return
+
     if (!isPlaying || isPaused) {
       cancelAnimationFrame(animRef.current)
       return
@@ -87,7 +135,6 @@ export default function ShowRunnerPage() {
           })
         )
 
-        // Master level
         setMasterLevelL(Math.min(100, masterVolume * 0.85 + (Math.random() - 0.3) * 20))
         setMasterLevelR(Math.min(100, masterVolume * 0.85 + (Math.random() - 0.3) * 20))
       }
@@ -98,8 +145,9 @@ export default function ShowRunnerPage() {
     return () => cancelAnimationFrame(animRef.current)
   }, [isPlaying, isPaused, totalTime, masterVolume])
 
-  // Decay meters when stopped
+  // ── Browser fallback: decay meters when stopped ──
   useEffect(() => {
+    if (isElectron()) return
     if (isPlaying && !isPaused) return
     const decay = setInterval(() => {
       setChannels((prev) => {
@@ -120,64 +168,124 @@ export default function ShowRunnerPage() {
     return () => clearInterval(decay)
   }, [isPlaying, isPaused])
 
+  // ── Handlers (unified: work in both modes) ────────
+
   const handleVolumeChange = useCallback((id: number, vol: number) => {
     setChannels((prev) => prev.map((c) => (c.id === id ? { ...c, volume: vol } : c)))
-  }, [])
+    engine.setVolume(id, vol)
+  }, [engine])
 
   const handlePanChange = useCallback((id: number, pan: number) => {
     setChannels((prev) => prev.map((c) => (c.id === id ? { ...c, pan } : c)))
-  }, [])
+    engine.setPan(id, pan)
+  }, [engine])
 
   const handleMute = useCallback((id: number) => {
-    setChannels((prev) => prev.map((c) => (c.id === id ? { ...c, muted: !c.muted } : c)))
-  }, [])
+    setChannels((prev) => {
+      const ch = prev.find((c) => c.id === id)
+      if (ch) engine.setMute(id, !ch.muted)
+      return prev.map((c) => (c.id === id ? { ...c, muted: !c.muted } : c))
+    })
+  }, [engine])
 
   const handleSolo = useCallback((id: number) => {
-    setChannels((prev) => prev.map((c) => (c.id === id ? { ...c, solo: !c.solo } : c)))
-  }, [])
+    setChannels((prev) => {
+      const ch = prev.find((c) => c.id === id)
+      if (ch) engine.setSolo(id, !ch.solo)
+      return prev.map((c) => (c.id === id ? { ...c, solo: !c.solo } : c))
+    })
+  }, [engine])
 
-  const handleLoadFile = useCallback((id: number) => {
-    const demoFiles = [
-      "click.wav", "drums.wav", "bass.wav", "keys.wav",
-      "guitar.wav", "vocals.wav", "bgv.wav", "pads.wav",
-    ]
-    setChannels((prev) =>
-      prev.map((c) => (c.id === id ? { ...c, fileName: demoFiles[id - 1] || "track.wav" } : c))
-    )
-  }, [])
+  const handleLoadFile = useCallback(async (id: number) => {
+    if (isElectron()) {
+      // Open native file dialog and load into engine
+      const fileInfo = await engine.loadFile(id)
+      if (fileInfo) {
+        setChannels((prev) =>
+          prev.map((c) => (c.id === id ? { ...c, fileName: fileInfo.name } : c))
+        )
+        // Update total time to match longest loaded file
+        setTotalTime((prev) => Math.max(prev, fileInfo.durationSeconds))
+      }
+    } else {
+      // Browser fallback: demo file names
+      const demoFiles = [
+        "click.wav", "drums.wav", "bass.wav", "keys.wav",
+        "guitar.wav", "vocals.wav", "bgv.wav", "pads.wav",
+      ]
+      setChannels((prev) =>
+        prev.map((c) => (c.id === id ? { ...c, fileName: demoFiles[id - 1] || "track.wav" } : c))
+      )
+    }
+  }, [engine])
 
-  const handleClear = useCallback((id: number) => {
+  const handleClear = useCallback(async (id: number) => {
+    await engine.unloadFile(id)
     setChannels((prev) =>
       prev.map((c) =>
         c.id === id ? { ...c, fileName: null, levelL: 0, levelR: 0 } : c
       )
     )
-  }, [])
+  }, [engine])
 
-  const handleDrop = useCallback((id: number, file: File) => {
-    setChannels((prev) =>
-      prev.map((c) => (c.id === id ? { ...c, fileName: file.name } : c))
-    )
-  }, [])
+  const handleDrop = useCallback(async (id: number, file: File) => {
+    if (isElectron()) {
+      // In Electron, File objects from drag-and-drop have a .path property
+      const filePath = (file as any).path as string
+      if (filePath) {
+        const fileInfo = await engine.loadFile(id, filePath)
+        if (fileInfo) {
+          setChannels((prev) =>
+            prev.map((c) => (c.id === id ? { ...c, fileName: fileInfo.name } : c))
+          )
+          setTotalTime((prev) => Math.max(prev, fileInfo.durationSeconds))
+        }
+      }
+    } else {
+      setChannels((prev) =>
+        prev.map((c) => (c.id === id ? { ...c, fileName: file.name } : c))
+      )
+    }
+  }, [engine])
 
-  const handlePlay = useCallback(() => {
-    setIsPlaying(true)
-    setIsPaused(false)
-  }, [])
+  const handlePlay = useCallback(async () => {
+    if (isElectron()) {
+      await engine.play()
+    } else {
+      setIsPlaying(true)
+      setIsPaused(false)
+    }
+  }, [engine])
 
-  const handlePause = useCallback(() => {
-    setIsPaused(true)
-  }, [])
+  const handlePause = useCallback(async () => {
+    if (isElectron()) {
+      await engine.pause()
+    } else {
+      setIsPaused(true)
+    }
+  }, [engine])
 
-  const handleStop = useCallback(() => {
-    setIsPlaying(false)
-    setIsPaused(false)
-    setCurrentTime(0)
-  }, [])
+  const handleStop = useCallback(async () => {
+    if (isElectron()) {
+      await engine.stop()
+    } else {
+      setIsPlaying(false)
+      setIsPaused(false)
+      setCurrentTime(0)
+    }
+  }, [engine])
 
-  const handleSeek = useCallback((t: number) => {
+  const handleSeek = useCallback(async (t: number) => {
+    if (isElectron()) {
+      await engine.seek(t)
+    }
     setCurrentTime(t)
-  }, [])
+  }, [engine])
+
+  const handleMasterVolumeChange = useCallback((vol: number) => {
+    setMasterVolume(vol)
+    engine.setMasterVolume(vol)
+  }, [engine])
 
   return (
     <main className="flex h-screen flex-col bg-background">
@@ -220,13 +328,17 @@ export default function ShowRunnerPage() {
           volume={masterVolume}
           levelL={masterLevelL}
           levelR={masterLevelR}
-          onVolumeChange={setMasterVolume}
+          onVolumeChange={handleMasterVolumeChange}
         />
       </div>
 
       {/* Bottom drawer: Songs / History / Settings */}
       <BottomDrawer
         onSelectSong={() => {}}
+        audioDevices={engineState.devices}
+        engineStatus={engineState.engineStatus}
+        onSetOutputDevice={engine.setOutputDevice}
+        isElectronMode={engineState.isElectronMode}
       />
 
       {/* Import dialog */}

@@ -6,5 +6,15 @@ __v0_jsx-dev-runtime.ts
 # Common ignores
 node_modules/
 .next/
+out/
 .env*.local
 .DS_Store
+
+# Electron build artifacts
+dist-electron/
+dist-release/
+
+# Native addon build
+native/build/
+native/deps/portaudio/lib/*.lib
+native/deps/portaudio/bin/*.dll
